@@ -5,8 +5,10 @@ Uses Google Generative AI SDK (ADK) with function calling.
 
 import os
 import random
+import time
 from google import genai
 from google.genai import types
+
 
 
 # =============================================================================
@@ -252,7 +254,24 @@ Be concise, enthusiastic, and fair!"""
 # MAIN GAME LOOP
 # =============================================================================
 
+def send_with_retry(chat, message, max_retries=3):
+    """Send a message with retry logic for rate limits."""
+    for attempt in range(max_retries):
+        try:
+            return chat.send_message(message)
+        except Exception as e:
+            error_str = str(e)
+            if "429" in error_str or "quota" in error_str.lower() or "rate" in error_str.lower():
+                wait_time = (attempt + 1) * 15  # 15, 30, 45 seconds
+                print(f"⏳ Rate limited, waiting {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                raise
+    raise Exception("Max retries exceeded due to rate limiting")
+
+
 def main():
+
     """Run the Rock-Paper-Scissors-Plus game in a CLI loop."""
     # Get API key from environment
     api_key = os.environ.get("GOOGLE_API_KEY")
@@ -287,7 +306,7 @@ def main():
 
     # Create a chat session with the tool
     chat = client.chats.create(
-        model="gemini-2.0-flash",
+        model="gemini-1.5-flash",
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
             tools=[submit_move_tool],
@@ -299,7 +318,7 @@ def main():
     print("=" * 60)
 
     # Initial prompt to get the game started
-    response = chat.send_message("Start the game! Explain the rules briefly and ask for my first move.")
+    response = send_with_retry(chat, "Start the game! Explain the rules briefly and ask for my first move.")
 
     while True:
         # Process any function calls in the response
@@ -313,7 +332,8 @@ def main():
                     if func_name == "submit_move":
                         result = submit_move(**func_args)
                         # Send the result back to the model
-                        response = chat.send_message(
+                        response = send_with_retry(
+                            chat,
                             types.Content(
                                 parts=[
                                     types.Part(
@@ -353,7 +373,7 @@ def main():
             break
 
         # Send user input to the model
-        response = chat.send_message(user_input)
+        response = send_with_retry(chat, user_input)
 
 
 if __name__ == "__main__":
