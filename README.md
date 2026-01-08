@@ -1,22 +1,14 @@
 # Rock-Paper-Scissors-Plus: AI Game Referee
 
-A CLI-based Rock-Paper-Scissors-Plus game where an AI (powered by Google Gemini) acts as a fair referee, enforcing rules and tracking game state.
+A CLI-based Rock-Paper-Scissors-Plus game with an automated bot opponent.
 
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
-pip install google-genai
-
-# 2. Set your API key
-# Windows PowerShell:
-$env:GOOGLE_API_KEY = "your-api-key-here"
-# Or Linux/Mac:
-# export GOOGLE_API_KEY="your-api-key-here"
-
-# 3. Run the game
 python referee.py
 ```
+
+No API key or external dependencies required!
 
 ## Game Rules
 
@@ -32,110 +24,92 @@ python referee.py
 
 ### State Model (`GameState` class)
 
-| Field             | Type   | Description                                    |
-|-------------------|--------|------------------------------------------------|
-| `round_number`    | int    | Current round (0-3)                            |
-| `user_score`      | int    | User's total wins                              |
-| `bot_score`       | int    | Bot's total wins                               |
-| `user_bomb_used`  | bool   | Has user spent their bomb?                     |
-| `bot_bomb_used`   | bool   | Has bot spent their bomb?                      |
-| `game_over`       | bool   | Is the game finished?                          |
-| `result_message`  | str    | Final result announcement                      |
+| Field             | Type   | Description                     |
+|-------------------|--------|---------------------------------|
+| `round_number`    | int    | Current round (0-3)             |
+| `user_score`      | int    | User's total wins               |
+| `bot_score`       | int    | Bot's total wins                |
+| `user_bomb_used`  | bool   | Has user spent their bomb?       |
+| `bot_bomb_used`   | bool   | Has bot spent their bomb?        |
+| `game_over`       | bool   | Is the game finished?           |
+| `result_message`  | str    | Final result announcement       |
 
-**Key Methods:**
-- `is_valid_move(move)`: Checks if input is rock/paper/scissors/bomb.
-- `can_use_bomb(player)`: Returns True if bomb is still available.
-- `resolve(user_move, bot_move)`: Determines round winner.
-- `check_game_over()`: Evaluates win conditions.
+### Separation of Concerns (ADK-Style)
+
+1. **Intent Understanding** (`main()`): Parses user input, handles quit commands
+2. **Game Logic** (`submit_move` tool): Validates moves, resolves rounds, updates state
+3. **Response Generation** (`format_round_result()`): Creates human-readable output
 
 ### Tool Design (`submit_move`)
 
-A single ADK tool handles all game logic:
-
 ```python
-def submit_move(user_move: str) -> dict:
+def submit_move(game_state: GameState, user_move: str) -> dict:
     """
     - Validates the move (including bomb restrictions).
-    - Generates the bot's move.
+    - Generates the bot's move (random, 20% bomb chance if available).
     - Resolves the round.
     - Updates game state.
-    - Returns structured result for the agent.
+    - Returns structured result dict.
     """
 ```
-
-**Why one tool?**  
-The game is simple enough that a single atomic "play a turn" tool keeps the agent's job clear: extract the user's intent and call the tool. The tool returns everything the agent needs to announce the result.
-
-### Agent/Referee
-
-The Gemini model is configured with:
-- **System Instruction**: Defines the referee persona (fair, concise, enthusiastic).
-- **Tool Binding**: The `submit_move` function is exposed to the model.
-
-**Separation of Concerns:**
-1. **Intent Understanding**: The LLM parses user input ("I'll go with rock", "BOMB!") and extracts the move.
-2. **Game Logic**: The `submit_move` tool validates, resolves, and mutates state.
-3. **Response Generation**: The LLM receives structured results and generates a human-friendly announcement.
 
 ---
 
 ## Tradeoffs
 
-| Decision                          | Rationale                                                                 |
-|-----------------------------------|---------------------------------------------------------------------------|
-| Single tool (`submit_move`)       | Simplicity; the game is small. Separate `validate` + `resolve` adds overhead. |
-| Global `game_state`               | Avoids passing state through messages; clean for a CLI demo.              |
-| Bot uses random moves             | Simple, unpredictable. Could be smarter (e.g., counter-strategy).         |
-| "Invalid = wasted round"          | Per spec. Alternative: prompt again (but spec says "wastes the round").   |
+| Decision                        | Rationale                                           |
+|---------------------------------|-----------------------------------------------------|
+| Single tool (`submit_move`)     | Simplicity; game is small. Clean atomic operations. |
+| Random bot moves                | Simple, unpredictable. Could add strategy later.    |
+| "Invalid = wasted round"        | Per spec. Alternative: prompt again.                |
+| No external dependencies        | Runs anywhere with just Python 3.                   |
 
 ---
 
 ## What I Would Improve
 
-1. **Multiple Agents**: A "Judge" agent that only interprets moves + a "Rules Engine" agent for pure logic.
-2. **Structured Output Schema**: Force the model to return JSON with move, confidence, etc.
-3. **Unit Tests**: Pytest suite for `GameState` logic (especially edge cases like double-bomb).
-4. **Session Persistence**: Allow resuming a game (serialize state to JSON).
-5. **Richer Bot Strategy**: Use a simple ML model or pattern recognition.
-
----
-
-## File Structure
-
-```
-uppliance/
-├── referee.py   # Main game: state, tool, agent, CLI loop
-└── README.md    # This file
-```
+1. **LLM Integration**: Add optional Gemini referee for natural language commentary
+2. **Smarter Bot**: Pattern recognition or counter-strategy
+3. **Unit Tests**: Pytest suite for `GameState` edge cases
+4. **Replay System**: Save and replay games
 
 ---
 
 ## Example Session
 
 ```
-============================================================
-  ROCK-PAPER-SCISSORS-PLUS
-============================================================
+==================================================
+   🎯 ROCK-PAPER-SCISSORS-PLUS 🎯
+==================================================
 
-🎯 Referee: Welcome! Here are the rules:
-1. Best of 3 rounds (first to 2 wins).
-2. Moves: rock, paper, scissors, bomb.
+📋 RULES:
+1. Best of 3 rounds (first to 2 wins)
+2. Moves: rock, paper, scissors, bomb
 3. Bomb beats all (once per player). Bomb vs bomb = draw.
-4. Invalid moves waste the round.
-Ready? Enter your move!
+4. Invalid input wastes the round.
+5. Game ends after max 3 rounds.
 
-Your move: rock
+🎮 Score - You: 0, Bot: 0 | Bomb left - You: Yes, Bot: Yes
+--------------------------------------------------
+Round 1 - Your move: rock
 
-🎯 Referee: Round 1: You played ROCK, I played SCISSORS.
-USER wins this round! Score: User 1 - Bot 0.
+🎮 Round 1
+   You: ROCK  vs  Bot: SCISSORS
+   ➡️  You WIN this round!
+   📊 Score: You 1 - 0 Bot
 
-Your move: bomb
+🎮 Score - You: 1, Bot: 0 | Bomb left - You: Yes, Bot: Yes
+--------------------------------------------------
+Round 2 - Your move: bomb
 
-🎯 Referee: Round 2: You played BOMB, I played PAPER.
-USER wins this round! 🎉 USER WINS THE GAME!
+🎮 Round 2
+   You: BOMB  vs  Bot: PAPER
+   ➡️  You WIN this round!
+   📊 Score: You 2 - 0 Bot
 
-============================================================
-  FINAL: 🎉 USER WINS THE GAME!
-  Score: User 2 - 0 Bot
-============================================================
+==================================================
+   🎉 YOU WIN THE GAME!
+==================================================
+
+🎮 Thanks for playing!
 ```
