@@ -1,14 +1,10 @@
 """
 Rock-Paper-Scissors-Plus Game Referee
-Uses Google Generative AI SDK (ADK) with function calling.
+A CLI game where you play against a bot referee.
+Uses ADK-style tools for game logic separation.
 """
 
-import os
 import random
-import time
-from google import genai
-from google.genai import types
-
 
 
 # =============================================================================
@@ -84,14 +80,14 @@ class GameState:
         """
         if self.user_score >= 2:
             self.game_over = True
-            self.result_message = "🎉 USER WINS THE GAME!"
+            self.result_message = "🎉 YOU WIN THE GAME!"
         elif self.bot_score >= 2:
             self.game_over = True
             self.result_message = "🤖 BOT WINS THE GAME!"
         elif self.round_number >= 3:
             self.game_over = True
             if self.user_score > self.bot_score:
-                self.result_message = "🎉 USER WINS THE GAME!"
+                self.result_message = "🎉 YOU WIN THE GAME!"
             elif self.bot_score > self.user_score:
                 self.result_message = "🤖 BOT WINS THE GAME!"
             else:
@@ -100,36 +96,28 @@ class GameState:
     def get_status(self) -> str:
         """Return a formatted status string."""
         return (
-            f"Round: {self.round_number}/3 | "
-            f"Score - User: {self.user_score}, Bot: {self.bot_score} | "
-            f"Bomb Available - User: {'Yes' if not self.user_bomb_used else 'No'}, "
+            f"Score - You: {self.user_score}, Bot: {self.bot_score} | "
+            f"Bomb left - You: {'Yes' if not self.user_bomb_used else 'No'}, "
             f"Bot: {'Yes' if not self.bot_bomb_used else 'No'}"
         )
 
 
 # =============================================================================
-# GLOBAL GAME STATE INSTANCE
+# ADK TOOL: submit_move (game logic separated from interface)
 # =============================================================================
 
-game_state = GameState()
-
-
-# =============================================================================
-# ADK TOOL: submit_move
-# =============================================================================
-
-def submit_move(user_move: str) -> dict:
+def submit_move(game_state: GameState, user_move: str) -> dict:
     """
     Process the user's move for the current round.
+    This is the ADK-style tool that handles all game logic.
 
     Args:
-        user_move: The move submitted by the user (rock, paper, scissors, bomb).
+        game_state: The current game state object.
+        user_move: The move submitted by the user.
 
     Returns:
         A dictionary with round outcome, moves, scores, and game status.
     """
-    global game_state
-
     # Check if game is already over
     if game_state.game_over:
         return {
@@ -149,7 +137,7 @@ def submit_move(user_move: str) -> dict:
         game_state.check_game_over()
         return {
             "success": False,
-            "message": f"Invalid move '{user_move}'! This round is wasted. No points awarded.",
+            "message": f"Invalid move '{user_move}'! Round wasted. No points awarded.",
             "round_number": game_state.round_number,
             "user_move": user_move,
             "bot_move": None,
@@ -158,17 +146,15 @@ def submit_move(user_move: str) -> dict:
             "bot_score": game_state.bot_score,
             "game_over": game_state.game_over,
             "final_result": game_state.result_message if game_state.game_over else None,
-            "status": game_state.get_status(),
         }
 
     # Check bomb validity for user
     if user_move == "bomb" and not game_state.can_use_bomb("user"):
-        # Bomb already used, treat as invalid
         game_state.round_number += 1
         game_state.check_game_over()
         return {
             "success": False,
-            "message": "You already used your bomb! This round is wasted.",
+            "message": "You already used your bomb! Round wasted.",
             "round_number": game_state.round_number,
             "user_move": user_move,
             "bot_move": None,
@@ -177,17 +163,16 @@ def submit_move(user_move: str) -> dict:
             "bot_score": game_state.bot_score,
             "game_over": game_state.game_over,
             "final_result": game_state.result_message if game_state.game_over else None,
-            "status": game_state.get_status(),
         }
 
     # Mark bomb used if applicable
     if user_move == "bomb":
         game_state.mark_bomb_used("user")
 
-    # Bot makes a move
+    # Bot makes a move (simple AI)
     bot_options = ["rock", "paper", "scissors"]
     if game_state.can_use_bomb("bot"):
-        # Bot has a small chance to use bomb
+        # Bot has 20% chance to use bomb if available
         if random.random() < 0.2:
             bot_options.append("bomb")
     bot_move = random.choice(bot_options)
@@ -202,10 +187,10 @@ def submit_move(user_move: str) -> dict:
     winner = game_state.resolve(user_move, bot_move)
     if winner == "user":
         game_state.user_score += 1
-        round_result = "USER wins this round!"
+        round_result = "You WIN this round!"
     elif winner == "bot":
         game_state.bot_score += 1
-        round_result = "BOT wins this round!"
+        round_result = "Bot WINS this round!"
     else:
         round_result = "It's a DRAW!"
 
@@ -223,157 +208,93 @@ def submit_move(user_move: str) -> dict:
         "bot_score": game_state.bot_score,
         "game_over": game_state.game_over,
         "final_result": game_state.result_message if game_state.game_over else None,
-        "status": game_state.get_status(),
     }
 
 
 # =============================================================================
-# AGENT CONFIGURATION
+# RESPONSE GENERATION (separated from game logic)
 # =============================================================================
 
-SYSTEM_INSTRUCTION = """You are a fair and enthusiastic referee for Rock-Paper-Scissors-Plus.
-
-RULES (explain briefly when asked or at game start):
-1. Best of 3 rounds (first to 2 wins, or most points after 3 rounds).
-2. Valid moves: rock, paper, scissors, bomb.
-3. Bomb beats everything except another bomb (draw). Each player can use bomb ONCE.
-4. Invalid input wastes the round (no points, round counts).
-5. Game ends automatically after max 3 rounds.
-
-YOUR JOB:
-- Prompt the user for their move.
-- Use the `submit_move` tool to process their input.
-- Announce the round outcome clearly: Round #, both moves, winner.
-- Track and display the score.
-- End the game and declare the final result when it's over.
-
-Be concise, enthusiastic, and fair!"""
+def format_round_result(result: dict) -> str:
+    """Generate a human-readable response from the tool result."""
+    lines = []
+    
+    if not result["success"] and result.get("bot_move") is None:
+        # Invalid move or bomb reuse
+        lines.append(f"❌ {result['message']}")
+    else:
+        # Valid round played
+        lines.append(f"🎮 Round {result['round_number']}")
+        lines.append(f"   You: {result['user_move'].upper()}  vs  Bot: {result['bot_move'].upper()}")
+        lines.append(f"   ➡️  {result['message']}")
+    
+    lines.append(f"   📊 Score: You {result['user_score']} - {result['bot_score']} Bot")
+    
+    if result["game_over"]:
+        lines.append("")
+        lines.append("=" * 50)
+        lines.append(f"   {result['final_result']}")
+        lines.append("=" * 50)
+    
+    return "\n".join(lines)
 
 
 # =============================================================================
-# MAIN GAME LOOP
+# MAIN GAME LOOP (Intent Understanding + Interface)
 # =============================================================================
 
-def send_with_retry(chat, message, max_retries=3):
-    """Send a message with retry logic for rate limits."""
-    for attempt in range(max_retries):
-        try:
-            return chat.send_message(message)
-        except Exception as e:
-            error_str = str(e)
-            if "429" in error_str or "quota" in error_str.lower() or "rate" in error_str.lower():
-                wait_time = (attempt + 1) * 15  # 15, 30, 45 seconds
-                print(f"⏳ Rate limited, waiting {wait_time}s...")
-                time.sleep(wait_time)
-            else:
-                raise
-    raise Exception("Max retries exceeded due to rate limiting")
+def print_rules():
+    """Print the game rules (max 5 lines as per spec)."""
+    print("""
+📋 RULES:
+1. Best of 3 rounds (first to 2 wins)
+2. Moves: rock, paper, scissors, bomb
+3. Bomb beats all (once per player). Bomb vs bomb = draw.
+4. Invalid input wastes the round.
+5. Game ends after max 3 rounds.
+""")
 
 
 def main():
-
-    """Run the Rock-Paper-Scissors-Plus game in a CLI loop."""
-    # Get API key from environment
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        print("ERROR: GOOGLE_API_KEY environment variable is not set.")
-        print("Please set it with: $env:GOOGLE_API_KEY = 'your-api-key'")
-        return
-
-    # Initialize the Gemini client with API key
-    client = genai.Client(api_key=api_key)
-
-    # Define the tool for the model
-    submit_move_tool = types.Tool(
-
-        function_declarations=[
-            types.FunctionDeclaration(
-                name="submit_move",
-                description="Process the user's move for the current round of Rock-Paper-Scissors-Plus.",
-                parameters=types.Schema(
-                    type=types.Type.OBJECT,
-                    properties={
-                        "user_move": types.Schema(
-                            type=types.Type.STRING,
-                            description="The move submitted by the user: rock, paper, scissors, or bomb.",
-                        ),
-                    },
-                    required=["user_move"],
-                ),
-            )
-        ]
-    )
-
-    # Create a chat session with the tool
-    chat = client.chats.create(
-        model="gemini-1.5-flash",
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            tools=[submit_move_tool],
-        ),
-    )
-
-    print("=" * 60)
-    print("  ROCK-PAPER-SCISSORS-PLUS  ")
-    print("=" * 60)
-
-    # Initial prompt to get the game started
-    response = send_with_retry(chat, "Start the game! Explain the rules briefly and ask for my first move.")
-
-    while True:
-        # Process any function calls in the response
-        if response.candidates and response.candidates[0].content.parts:
-            for part in response.candidates[0].content.parts:
-                if part.function_call:
-                    # Execute the tool
-                    func_name = part.function_call.name
-                    func_args = dict(part.function_call.args) if part.function_call.args else {}
-
-                    if func_name == "submit_move":
-                        result = submit_move(**func_args)
-                        # Send the result back to the model
-                        response = send_with_retry(
-                            chat,
-                            types.Content(
-                                parts=[
-                                    types.Part(
-                                        function_response=types.FunctionResponse(
-                                            name=func_name,
-                                            response=result,
-                                        )
-                                    )
-                                ]
-                            )
-                        )
-                        continue
-
-            # Print the text response from the model
-            text_parts = [p.text for p in response.candidates[0].content.parts if hasattr(p, 'text') and p.text]
-            if text_parts:
-                print(f"\n🎯 Referee: {''.join(text_parts)}\n")
-
-        # Check if game is over
-        if game_state.game_over:
-            print("=" * 60)
-            print(f"  FINAL: {game_state.result_message}")
-            print(f"  Score: User {game_state.user_score} - {game_state.bot_score} Bot")
-            print("=" * 60)
-            break
-
-        # Get user input
+    """Run the Rock-Paper-Scissors-Plus game."""
+    print("=" * 50)
+    print("   🎯 ROCK-PAPER-SCISSORS-PLUS 🎯")
+    print("=" * 50)
+    
+    print_rules()
+    
+    # Initialize game state
+    game = GameState()
+    
+    print(f"🎮 {game.get_status()}")
+    print("-" * 50)
+    
+    while not game.game_over:
+        # Get user input (Intent Understanding)
         try:
-            user_input = input("Your move: ").strip()
+            user_input = input(f"Round {game.round_number + 1} - Your move: ").strip()
             if not user_input:
                 continue
             if user_input.lower() in ["quit", "exit", "q"]:
                 print("Thanks for playing! Goodbye!")
-                break
+                return
         except (KeyboardInterrupt, EOFError):
             print("\nThanks for playing! Goodbye!")
-            break
-
-        # Send user input to the model
-        response = send_with_retry(chat, user_input)
+            return
+        
+        # Process move through the tool (Game Logic)
+        result = submit_move(game, user_input)
+        
+        # Generate and display response (Response Generation)
+        print()
+        print(format_round_result(result))
+        print()
+        
+        if not game.game_over:
+            print(f"🎮 {game.get_status()}")
+            print("-" * 50)
+    
+    print("\n🎮 Thanks for playing!")
 
 
 if __name__ == "__main__":
