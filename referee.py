@@ -3,9 +3,11 @@ Rock-Paper-Scissors-Plus Game Referee
 Uses Google Generative AI SDK (ADK) with function calling.
 """
 
+import os
 import random
 from google import genai
 from google.genai import types
+
 
 # =============================================================================
 # GAME STATE MODEL
@@ -252,11 +254,19 @@ Be concise, enthusiastic, and fair!"""
 
 def main():
     """Run the Rock-Paper-Scissors-Plus game in a CLI loop."""
-    # Initialize the Gemini client
-    client = genai.Client()
+    # Get API key from environment
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        print("ERROR: GOOGLE_API_KEY environment variable is not set.")
+        print("Please set it with: $env:GOOGLE_API_KEY = 'your-api-key'")
+        return
+
+    # Initialize the Gemini client with API key
+    client = genai.Client(api_key=api_key)
 
     # Define the tool for the model
     submit_move_tool = types.Tool(
+
         function_declarations=[
             types.FunctionDeclaration(
                 name="submit_move",
